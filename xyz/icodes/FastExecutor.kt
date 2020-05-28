@@ -16,7 +16,10 @@ class FastExecutor private constructor(private val executor: ThreadPoolExecutor)
         private val CPU_COUNT = Runtime.getRuntime().availableProcessors()
         private val CORE_SIZE = max(2, min(CPU_COUNT - 1, 4))
         private val MAX_SIZE = CPU_COUNT * 2 + 1
-
+        val DEFAULT: ExecutorService by lazy {
+            newExecutor()
+        }
+        
         fun newExecutor(name: String = "Fast",
                         corePoolSize: Int = CORE_SIZE,
                         maximumPoolSize: Int = MAX_SIZE,
