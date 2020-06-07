@@ -1,36 +1,44 @@
 package xyz.icodes.executor
 
+import xyz.icodes.executor.ExecutorConfig.CORE_SIZE
+import xyz.icodes.executor.ExecutorConfig.MAX_SIZE
 import java.util.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  *
  */
-class FastExecutor private constructor(private val executor: ThreadPoolExecutor): ExecutorService by executor {
+class FastExecutor private constructor(private val executor: ThreadPoolExecutor):
+    Executor by executor {
     companion object {
-        private const val TAG = "FastExecutor"
-        private val CPU_COUNT = Runtime.getRuntime().availableProcessors()
-        private val CORE_SIZE = max(2, min(CPU_COUNT - 1, 4))
-        private val MAX_SIZE = CPU_COUNT * 2 + 1
-        val DEFAULT: ExecutorService by lazy {
+        private const val TAG = "${ExecutorConfig.TAG}.Executor"
+        private val QUEUE_CAPACITY = CORE_SIZE * 2
+
+        val DEFAULT: Executor by lazy {
             newExecutor()
         }
-        
+
+        /**
+         * @param name thread prefix name
+         * @param corePoolSize
+         * @param maximumPoolSize
+         * @param keepAliveTimeSecond
+         * @param capacity 第一个队列最大数量，达到数量限制后，就会启动 非核心线程，之后超出的 task 会被放到 第二个队列
+         * @param workQueue 第一个队列
+         * @param threadFactory
+         */
         fun newExecutor(name: String = "Fast",
                         corePoolSize: Int = CORE_SIZE,
                         maximumPoolSize: Int = MAX_SIZE,
-                        keepAliveTime: Long = 30,
-                        unit: TimeUnit = TimeUnit.SECONDS,
-                        workQueue: BlockingQueue<Runnable> = LinkedBlockingDeque(128),
-                        threadFactory: ThreadFactory = DefaultThreadFactory(
-                            name
-                        )
-        ): ExecutorService {
-            val executor = object : ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory) {
+                        keepAliveTimeSecond: Long = 30,
+                        capacity: Int = QUEUE_CAPACITY,
+                        allowCoreThreadTimeOut: Boolean = false,
+                        workQueue: BlockingQueue<Runnable> = LinkedBlockingDeque(capacity),
+                        threadFactory: ThreadFactory = DefaultThreadFactory(name)
+        ): Executor {
+            val executor = object : ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTimeSecond, TimeUnit.SECONDS, workQueue, threadFactory) {
                 lateinit var idleTask: (ExecutorService)->Unit
 
                 override fun afterExecute(r: Runnable?, t: Throwable?) {
@@ -42,12 +50,13 @@ class FastExecutor private constructor(private val executor: ThreadPoolExecutor)
                 }
             }
 
+            executor.allowCoreThreadTimeOut(allowCoreThreadTimeOut)
             val fastExecutor = FastExecutor(executor)
             executor.setRejectedExecutionHandler { r, _ ->
                 r?.let { fastExecutor.fillSecondQueue(it) }
             }
             executor.idleTask = {
-                fastExecutor.pollSecondQueue()
+                fastExecutor.consumeOne()
             }
 
             println("$TAG, corePoolSize: $corePoolSize, maximumPoolSize： $maximumPoolSize, Capacity: ${workQueue.remainingCapacity()}")
@@ -65,7 +74,7 @@ class FastExecutor private constructor(private val executor: ThreadPoolExecutor)
 
             return { queue ->
                 if (queue.remainingCapacity() > 0) {
-                    fastExecutor.pollSecondQueue()
+                    fastExecutor.consumeOne()
                 }
             }
         }
@@ -77,18 +86,47 @@ class FastExecutor private constructor(private val executor: ThreadPoolExecutor)
      * fill rejected tack into  second queue
      */
     private fun fillSecondQueue(task: Runnable) {
-        println("$TAG, fillSecondQueue second queue size: ${secondQueue.size()}, first Queue size ${executor.queue.size}, ${executor.poolSize}, task: $task")
+//        println("$TAG, fillSecondQueue, " +
+//                "first Queue: ${executor.queue.size}, " +
+//                "second queue: ${secondQueue.size()}, " +
+//                "poolSize ${executor.poolSize}, " +
+//                "task: $task")
         secondQueue.offer(task)
     }
 
-    /**
-     * poll task from second queue when first queue is not full
-     */
-    private fun pollSecondQueue() {
-        secondQueue.poll()?.let {
-            println("$TAG, pollSecondQueue queue size: ${secondQueue.size()}, first Queue size ${executor.queue.size}, ${executor.poolSize}, task: $it")
-            execute(it)
+    private fun consumeOne() {
+        if (executor.queue.isNotEmpty() || secondQueue.isNotEmpty()) {
+            pollOne()?.let {
+//                println("consumeOne $it")
+                execute(it)
+            }
         }
+    }
+
+    /**
+     * poll task from first queue is not empty,
+     * else from second queue
+     */
+    private fun pollOne(): Runnable? {
+        executor.queue.poll()?.let {
+//            println("$TAG, pollOne, from first queue, \n " +
+//                    "first Queue: ${executor.queue.size}, " +
+//                    "second queue: ${secondQueue.size()}, " +
+//                    "poolSize ${executor.poolSize}, " +
+//                    "task: $it")
+            return it
+        }
+
+        secondQueue.poll()?.let {
+//            println("$TAG, pollOne, from second queue，\n " +
+//                    "first Queue: ${executor.queue.size}, " +
+//                    "second queue: ${secondQueue.size()}, " +
+//                    "poolSize ${executor.poolSize}, " +
+//                    "task: $it")
+            return it
+        }
+
+        return null
     }
 
     override fun toString(): String {
@@ -123,6 +161,8 @@ class SecondQueue {
     }
 
     fun size() = queue.size
+
+    fun isNotEmpty() = queue.size > 0
 }
 
 private class DefaultThreadFactory(private val name: String) : ThreadFactory {
