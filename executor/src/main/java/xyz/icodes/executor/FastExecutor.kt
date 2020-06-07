@@ -11,12 +11,12 @@ import java.util.concurrent.locks.ReentrantLock
  *
  */
 class FastExecutor private constructor(private val executor: ThreadPoolExecutor):
-    Executor by executor {
+    IExecutor, Executor by executor {
     companion object {
         private const val TAG = "${ExecutorConfig.TAG}.Executor"
         private val QUEUE_CAPACITY = CORE_SIZE * 2
 
-        val DEFAULT: Executor by lazy {
+        val DEFAULT: IExecutor by lazy {
             newExecutor()
         }
 
@@ -37,7 +37,7 @@ class FastExecutor private constructor(private val executor: ThreadPoolExecutor)
                         allowCoreThreadTimeOut: Boolean = false,
                         workQueue: BlockingQueue<Runnable> = LinkedBlockingDeque(capacity),
                         threadFactory: ThreadFactory = DefaultThreadFactory(name)
-        ): Executor {
+        ): IExecutor {
             val executor = object : ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTimeSecond, TimeUnit.SECONDS, workQueue, threadFactory) {
                 lateinit var idleTask: (ExecutorService)->Unit
 
@@ -129,6 +129,14 @@ class FastExecutor private constructor(private val executor: ThreadPoolExecutor)
         return null
     }
 
+    override fun remove(runnable: Runnable?) {
+        runnable?.let {
+            if (!executor.remove(runnable)) {
+                secondQueue.remove(runnable)
+            }
+        }
+    }
+
     override fun toString(): String {
         return executor.toString()
     }
@@ -163,6 +171,16 @@ class SecondQueue {
     fun size() = queue.size
 
     fun isNotEmpty() = queue.size > 0
+
+    fun remove(runnable: Runnable) {
+        lock.lock()
+
+        try {
+            queue.remove(runnable)
+        } finally {
+            lock.unlock()
+        }
+    }
 }
 
 private class DefaultThreadFactory(private val name: String) : ThreadFactory {
