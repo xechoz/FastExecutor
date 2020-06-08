@@ -52,9 +52,10 @@ executor.apply {
 
 # 建议
 
-线程池至少需要分两个类型，一个是用于 io，一个用于 cpu。因为 io 更多的时候 thread 是出于 waiting 的状态，可以尽量多线程；
+线程池至少需要分两个类型，一个是用于 io，一个用于 cpu。  
+因为 io 更多的时候 thread 是处于 waiting 的状态，可以尽量多线程；
 cpu 密集型，应该避免线程太多，频繁切换线程，容易导致 thread context 频繁切换出现性能问题.  
-cpu 密集型的线程池，可能使用 looper, 或者 单线程的类型也是可以很高效。
+cpu 密集型的线程池，可能使用 looper, 或者 单线程的模型也可以很高效。
 
 # 参考
 1. [Fast-Executor 原理](https://blog.icodes.xyz/2020/05/28/Fast-Executor-Thread-Pool/)
