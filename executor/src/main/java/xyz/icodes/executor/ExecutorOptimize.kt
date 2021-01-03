@@ -1,4 +1,4 @@
-package com.yy.hiyo.startup.executor
+package xyz.icodes.executor
 
 import android.annotation.SuppressLint
 import android.os.Process
